@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/blang/semver"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/pulumi/pulumi/pkg/v3/resource/deploy/deploytest"
@@ -695,6 +696,102 @@ func TestDisableDefaultProviders(t *testing.T) {
 
 		})
 	}
+}
+
+// Create a hardcoded ProviderLoader to test Component Option creation.
+func createProviderLoaders() []*deploytest.ProviderLoader {
+	var (
+		providerName   tokens.Package = "pkgA"
+		providerSemver                = semver.MustParse("1.0.0")
+		loaderFn                      = func() (plugin.Provider, error) {
+			return &deploytest.Provider{
+				CreateF: func(urn resource.URN, inputs resource.PropertyMap, timeout float64,
+					preview bool) (resource.ID, resource.PropertyMap, resource.Status, error) {
+					return resource.ID("id123"), inputs, resource.StatusOK, nil
+				},
+			}, nil
+		}
+		loaders = []*deploytest.ProviderLoader{
+			deploytest.NewProviderLoader(providerName, providerSemver, loaderFn),
+		}
+	)
+	return loaders
+}
+
+func TestComponentOptionWarnings(t *testing.T) {
+	t.Parallel()
+	var loader = createProviderLoaders()
+	_ = loader
+	var runtimeCallback = func(_ plugin.RunInfo, monitor *deploytest.ResourceMonitor) error {
+		var opts = deploytest.ResourceOptions{
+			// …
+		}
+		var componentName tokens.Token = "component"
+		var resourceName tokens.Token = "resA"
+		_, _, _, err := monitor.RegisterResource(componentName, resourceName, false, opts)
+		assert.NoError(t, err)
+		// TODO: Assert warnings exist!
+		return nil
+	}
+	var program = deploytest.NewLanguageRuntime(runtimeCallback)
+
+	/*
+		var inputs resource.PropertyMap
+		program := deploytest.NewLanguageRuntime(func(_ plugin.RunInfo, monitor *deploytest.ResourceMonitor) error {
+			_, _, _, err := monitor.RegisterResource("pkgA:m:typA", "resA", true, deploytest.ResourceOptions{
+				Inputs:                  inputs,
+				AdditionalSecretOutputs: []resource.PropertyKey{"a", "b"},
+			})
+			assert.NoError(t, err)
+			return nil
+		})
+		host := deploytest.NewPluginHost(nil, nil, program, loaders...)
+
+		p := &TestPlan{
+			Options: UpdateOptions{Host: host},
+		}
+
+		project := p.GetProject()
+
+		inputs = resource.PropertyMap{
+			"a": resource.NewStringProperty("testA"),
+			// b is missing
+			"c": resource.MakeSecret(resource.NewStringProperty("testC")),
+		}
+
+		// Run an update to create the resource and check we warn about b
+		validate := func(
+			project workspace.Project, target deploy.Target,
+			entries JournalEntries, events []Event,
+			res result.Result) result.Result {
+
+			if res != nil {
+				return res
+			}
+
+			for i := range events {
+				if events[i].Type == "diag" {
+					payload := events[i].Payload().(engine.DiagEventPayload)
+					if payload.Severity == "warning" &&
+						payload.URN == "urn:pulumi:test::test::pkgA:m:typA::resA" &&
+						payload.Message == "<{%reset%}>Could not find property 'b' listed in additional secret outputs.<{%reset%}>\n" {
+						// Found the message we expected
+						return nil
+					}
+				}
+			}
+			return result.Error("Expected a diagnostic message, got none")
+		}
+		snap, res := TestOp(Update).Run(project, p.GetTarget(t, nil), p.Options, false, p.BackendClient, validate)
+		assert.Nil(t, res)
+
+		// Should have the provider and resA
+		assert.Len(t, snap.Resources, 2)
+		resA := snap.Resources[1]
+		assert.Equal(t, []resource.PropertyKey{"a", "b"}, resA.AdditionalSecretOutputs)
+		assert.True(t, resA.Outputs["a"].IsSecret())
+		assert.True(t, resA.Outputs["c"].IsSecret())
+	*/
 }
 
 // TODO[pulumi/pulumi#2753]: We should re-enable these tests (and fix them up as needed) once we have a solution
