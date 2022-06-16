@@ -25,6 +25,7 @@ import (
 	"github.com/blang/semver"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/pulumi/pulumi/pkg/v3/engine"
 	"github.com/pulumi/pulumi/pkg/v3/resource/deploy/deploytest"
 	"github.com/pulumi/pulumi/pkg/v3/resource/deploy/providers"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
@@ -718,23 +719,165 @@ func createProviderLoaders() []*deploytest.ProviderLoader {
 	return loaders
 }
 
+// This test checks that warnings are emitted when options which have no
+// effect on components are attached to a component resource.
 func TestComponentOptionWarnings(t *testing.T) {
 	t.Parallel()
-	var loader = createProviderLoaders()
-	_ = loader
-	var runtimeCallback = func(_ plugin.RunInfo, monitor *deploytest.ResourceMonitor) error {
-		var opts = deploytest.ResourceOptions{
-			// …
-		}
-		var componentName tokens.Token = "component"
-		var resourceName tokens.Token = "resA"
-		_, _, _, err := monitor.RegisterResource(componentName, resourceName, false, opts)
-		assert.NoError(t, err)
-		// TODO: Assert warnings exist!
-		return nil
+	// These are the options which have no effect on components.
+	var ignoredOptions = []deploytest.ResourceOptions{
+		{
+			RetainOnDelete: true,
+		}, {
+			IgnoreChanges: []string{"root"},
+		}, {
+			CustomTimeouts: &resource.CustomTimeouts{},
+		}, {
+			ReplaceOnChanges: []string{"*"},
+		}, {
+			AdditionalSecretOutputs: []resource.PropertyKey{"foobar"},
+		},
 	}
-	var program = deploytest.NewLanguageRuntime(runtimeCallback)
+	// For each of these scenarios, assert that a component resource
+	// with this option applied produces a warning.
+	for _, opt := range ignoredOptions {
+		var program = func(_ plugin.RunInfo, monitor *deploytest.ResourceMonitor) error {
+			_, _, _, err := monitor.RegisterResource("component", "resA", false, opt)
+			assert.NoError(t, err)
+			return nil
+		}
+		var runInfo = &EvalRunInfo{
+			Proj:   &workspace.Project{Name: "test"},
+			Target: &Target{Name: "test"},
+		}
+		var providerSource = &testProviderSource{}
+		// Eval the program and capture emitted events.
+		var ctx, err = newTestPluginContext(program)
+		assert.NoError(t, err)
+		var iter, res = NewEvalSource(ctx, runInfo, nil, false).Iterate(context.Background(), Options{}, providerSource)
+		assert.Nil(t, res)
+		// Check that each of the expected warnings was emitted.
+		var foundWarning = false
+		for {
+			event, res := iter.Next()
+			assert.Nil(t, res)
+			if event == nil {
+				break
+			}
+			if event.Type == "diag" {
+				var payload = event.Payload().(engine.DiagEventPayload)
+				if payload.Severity == "warning" &&
+					payload.Message == "foobar" {
+					foundWarning = true
+				}
+			}
 
+		}
+		if !foundWarning {
+			t.Error("Expected a diagnostic message, got none")
+		}
+		/*
+			for {
+				if events[i].Type == "diag" {
+					payload := events[i].Payload().(engine.DiagEventPayload)
+					if payload.Severity == "warning" &&
+						payload.URN == "urn:pulumi:test::test::pkgA:m:typA::resA" &&
+						payload.Message == "<{%reset%}>Could not find property 'b' listed in additional secret outputs.<{%reset%}>\n" {
+						// Found the message we expected
+						return nil
+					}
+				}
+			}
+			// return result.Error("Expected a diagnostic message, got none")
+
+			var reg = event.(RegisterResourceEvent)
+			_ = reg
+			// TODO: Check if there's a WARNING.
+		*/
+	}
+
+	/*
+
+		var program = deploytest.NewLanguageRuntime(func(_ plugin.RunInfo, monitor *deploytest.ResourceMonitor) error {
+			var opts = deploytest.ResourceOptions{
+				// …
+			}
+			_, _, _, err := monitor.RegisterResource("component", "resA", false, opts)
+			assert.NoError(t, err)
+			return nil
+		})
+		var host = deploytest.NewPluginHost(nil, nil, program)
+		var plan = &lifecycletest.TestPlan{
+			Optinos: lifecycletest.UpdateOptions{Host: host},
+			Steps:   lifecycletest.MakeBasicLifecycleSteps(t, 1),
+		}
+		plan.Run(t, nil)
+	*/
+	// HERE BE GOOD CODE
+	/*
+
+		program := func(_ plugin.RunInfo, resmon *deploytest.ResourceMonitor) error {
+			// Perform some reads and invokes with explicit provider references.
+			_, _, perr := resmon.ReadResource("pkgA:m:typA", "resA", "id1", "", nil, providerARef.String(), "")
+			assert.NoError(t, perr)
+			_, _, perr = resmon.ReadResource("pkgA:m:typB", "resB", "id1", "", nil, providerBRef.String(), "")
+			assert.NoError(t, perr)
+			_, _, perr = resmon.ReadResource("pkgC:m:typC", "resC", "id1", "", nil, providerCRef.String(), "")
+			assert.NoError(t, perr)
+
+			_, _, perr = resmon.Invoke("pkgA:m:funcA", nil, providerARef.String(), "")
+			assert.NoError(t, perr)
+			_, _, perr = resmon.Invoke("pkgA:m:funcB", nil, providerBRef.String(), "")
+			assert.NoError(t, perr)
+			_, _, perr = resmon.Invoke("pkgC:m:funcC", nil, providerCRef.String(), "")
+			assert.NoError(t, perr)
+
+			return nil
+		}
+
+		// Create and iterate an eval source.
+		ctx, err := newTestPluginContext(program)
+		assert.NoError(t, err)
+
+		iter, res := NewEvalSource(ctx, runInfo, nil, false).Iterate(context.Background(), Options{}, providerSource)
+		assert.Nil(t, res)
+
+		reads := 0
+		for {
+			event, res := iter.Next()
+			assert.Nil(t, res)
+			if event == nil {
+				break
+			}
+
+			read := event.(ReadResourceEvent)
+			urn := newURN(read.Type(), string(read.Name()), read.Parent())
+			read.Done(&ReadResult{
+				State: resource.NewState(read.Type(), urn, true, false, read.ID(), read.Properties(),
+					resource.PropertyMap{}, read.Parent(), false, false, read.Dependencies(), nil, read.Provider(), nil,
+					false, nil, nil, nil, "", 0, false),
+			})
+			reads++
+		}
+
+
+	*/
+
+	/*
+		var loader = createProviderLoaders()
+		_ = loader
+		var runtimeCallback = func(_ plugin.RunInfo, monitor *deploytest.ResourceMonitor) error {
+			var opts = deploytest.ResourceOptions{
+				// …
+			}
+			var componentName tokens.Token = "component"
+			var resourceName tokens.Token = "resA"
+			_, _, _, err := monitor.RegisterResource(componentName, resourceName, false, opts)
+			assert.NoError(t, err)
+			// TODO: Assert warnings exist!
+			return nil
+		}
+		var program = deploytest.NewLanguageRuntime(runtimeCallback)
+	*/
 	/*
 		var inputs resource.PropertyMap
 		program := deploytest.NewLanguageRuntime(func(_ plugin.RunInfo, monitor *deploytest.ResourceMonitor) error {
