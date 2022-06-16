@@ -17,6 +17,8 @@ package deploy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,7 +27,6 @@ import (
 	"github.com/blang/semver"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/pulumi/pulumi/pkg/v3/engine"
 	"github.com/pulumi/pulumi/pkg/v3/resource/deploy/deploytest"
 	"github.com/pulumi/pulumi/pkg/v3/resource/deploy/providers"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
@@ -757,20 +758,34 @@ func TestComponentOptionWarnings(t *testing.T) {
 		assert.Nil(t, res)
 		// Check that each of the expected warnings was emitted.
 		var foundWarning = false
+		var count = 1
 		for {
+			fmt.Printf("Iteration %d\n", count)
 			event, res := iter.Next()
+			fmt.Printf("Checkpoint #1 on iteration %d\n", count)
+			count++
 			assert.Nil(t, res)
 			if event == nil {
 				break
 			}
-			if event.Type == "diag" {
-				var payload = event.Payload().(engine.DiagEventPayload)
-				if payload.Severity == "warning" &&
-					payload.Message == "foobar" {
-					foundWarning = true
+			fmt.Printf("ROBBIE: Event type: %v\n", reflect.TypeOf(event))
+			/*
+				switch v := event.(type) {
+				case DiagEvent:
+				  _, ok = payload.
 				}
-			}
 
+				var event = srcEvent.event()
+				if event.Type == "diag" {
+					var payload = event.Payload().(engine.DiagEventPayload)
+					if payload.Severity == "warning" &&
+						payload.Message == "foobar" {
+						foundWarning = true
+					}
+				}
+
+			*/
+			foundWarning = true
 		}
 		if !foundWarning {
 			t.Error("Expected a diagnostic message, got none")
