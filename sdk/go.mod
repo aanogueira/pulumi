@@ -2,8 +2,6 @@ module github.com/pulumi/pulumi/sdk/v3
 
 go 1.17
 
-replace golang.org/x/text => golang.org/x/text v0.3.6
-
 require (
 	github.com/Microsoft/go-winio v0.4.14
 	github.com/blang/semver v3.5.1+incompatible
@@ -74,7 +72,7 @@ require (
 	github.com/xanzy/ssh-agent v0.2.1 // indirect
 	go.uber.org/atomic v1.6.0 // indirect
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
-	golang.org/x/text v0.3.3 // indirect
+	golang.org/x/text v0.3.7 // indirect
 	google.golang.org/genproto v0.0.0-20200608115520-7c474a2e3482 // indirect
 	google.golang.org/protobuf v1.24.0
 	gopkg.in/cheggaaa/pb.v1 v1.0.28 // indirect
